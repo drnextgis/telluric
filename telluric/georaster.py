@@ -27,7 +27,7 @@ import rasterio
 import rasterio.warp
 import rasterio.shutil
 from rasterio.coords import BoundingBox
-from rasterio.enums import Resampling, Compression
+from rasterio.enums import Resampling, Compression, MaskFlags
 from rasterio.features import geometry_mask
 from rasterio.io import WindowMethodsMixin
 from affine import Affine
@@ -1150,6 +1150,22 @@ class GeoRaster2(WindowMethodsMixin, _Raster):
                      resampling=resampling, **kwargs)
 
             new_raster = GeoRaster2(filename=tf.name, temporary=True)
+
+            # restore a mask
+            with self._raster_opener(self._filename) as src:
+                for mf in src.mask_flag_enums:
+                    if MaskFlags.per_dataset in mf:
+                        src_mask = src.read_masks(1)
+                        dst_mask = src.read_masks(1, out_shape=(new_raster.height, new_raster.width))
+                        rasterio.warp.reproject(
+                            src_mask, dst_mask, src_crs=self.crs, dst_crs=new_raster.crs,
+                            src_transform=self.affine, dst_transform=new_raster.affine)
+
+                        with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+                            with self._raster_opener(tf.name, 'r+') as dst:
+                                dst.write_mask(dst_mask)
+                        break
+
         else:
             # image is loaded already
             # SimpleNamespace is handy to hold the properties that calc_transform expects, see
